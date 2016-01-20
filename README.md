@@ -63,5 +63,7 @@ Disable push to a specific remote by setting to no.
 Disable fetch and merge from a specific remote by setting to no.
 
 # Notes on git-annex
-The git-sync script provides for some compatibility with git-annex, however, it does __not__ actually handle annexed files, only regular files checked into git. Refer to the config settings `branch.{local-branch-name}.sync` and `remote.{remote-name}.sync` above.
+The git-sync script provides for some compatibility with git-annex, in that it can be configured to sync with remote repos using git-annex, however, it does __not__ actually handle annexed files. It is not meant to be run directly on a working-tree with git-annex.
+
+Refer to the config settings `branch.{local-branch-name}.sync` and `remote.{remote-name}.sync` above.
 
