@@ -20,6 +20,14 @@ git-sync does not force any push or fetch, so, it is quite safe to use on any re
 # Configuration Settings
 Notation note: {some-field} implies that you need to fill in the actual value `without the {}`.
 
+## branch.{local-branch-name}.sync
+Set a default remote branch-name to use with your local branch, for example:
+```
+git config branch.master.sync synced/master
+```
+- this would change the default remote branch to `synced/master` (assuming your current branch is master).
+- push/fetch/merge from {remote}/synced/master for some compatibility with git-annex.
+
 ## remote.{remote-name}.sync
 Set a prefix for syncing to a certain remote, or, disable syncing with that remote (by setting to NONE).
 
@@ -35,14 +43,6 @@ Provide a `prefix` value in order to sync to a different remote branch:
 - For example, if your current branch is `master` then: `git config remote.repo2.sync synced`
     - git-sync will use `remote/repo2/synced/master`
     - this form provides some compatibility with git-annex.
-
-## branch.{local-branch-name}.sync
-Set a default remote branch-name to use with your local branch, for example:
-```
-git config branch.master.sync synced/master
-```
-- this would change the default remote branch to `synced/master` (assuming your current branch is master).
-- push/fetch/merge from {remote}/synced/master for some compatibility with git-annex.
 
 ### branch.{local-branch-name}.{remote-name}-sync
 Like remote.{remote-name}.sync above, but applies only to a certain remote.
