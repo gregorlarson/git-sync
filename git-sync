@@ -111,6 +111,16 @@ $verbose && oflag='-v'
 
 git_dir=`git rev-parse --git-dir`
 
+# For now, exclude local repo where git-annex is active.
+# Not sure what the interactions are.
+if [ -d "$git_dir/annex" ]; then
+   log "Found $git_dir/annex/"
+   log "Note that while git-sync may be configured to sync with remote"
+   log "repos using git annex, I don't recommend it being used on the same"
+   log "working repo where git-annex is active."
+   die "cannot continue"
+fi
+
 exit_unmerged
 
 # The list of remotes to sync can be configured in
