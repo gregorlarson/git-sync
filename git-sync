@@ -1,0 +1,305 @@
+#!/bin/sh
+
+# Utility functions:
+
+# Use fd 3 for logging, default stderr.
+exec 3>&-
+exec 3>&2
+log() { echo "$*" >&3 ; }
+die() { log "$*" ; exit 7 ; }
+
+verbose=false
+bugme() {
+   $verbose || return
+   log "$@"
+}
+debug_flag=false
+debug() {
+   $debug_flag || return
+   log "$@"
+}
+
+quiet=false
+[ "$GIT_SYNC_QUIET" ] && quiet=true
+
+note() {
+   $quiet && return
+   log "$@"
+}
+git() {
+   local rc
+   bugme "git $*"
+   command git "$@" ; rc=$?
+   [ $rc -eq 0 ] || bugme "		git rc=$rc"
+   return $rc
+}
+
+#parms: config var
+read_gitconfig() {
+  [ $# -eq 2 ] || die "read_gitconfig internal error $*"
+
+  local c
+  if c=`command git config --get "$1"` ; then
+     bugme "read $1 = $c"
+     eval "$2='$c'"
+  else
+     debug "read $1 (unset)"
+     eval "$2="
+  fi
+}
+
+mergehead="$git_dir/MERGE_HEAD"
+exit_unmerged() {
+  [ -f "$mergehead" ] && die "finish or abort merge before doing sync (again)."
+  # There are a bunch of in-progress states which whe should
+  # probably resolve before attempting a sync
+  local d=$git_dir
+  [ -d "$d/rebase-apply" ] && die "finish rebase(apply) before syncing"
+  [ -d "$d/rebase-merge" ] && die "finish rebase(merge) before syncing"
+  [ -f "$d/CHERRY_PICK_HEAD" ] && die "finish cherry-pick before syncing"
+  [ -f "$d/BISECT_LOG" ] && die "finish bisect before syncing"
+}
+
+#parms: remote
+# Check if a 'local' repo is missing.
+# Return true if the provided remote is 'local' and
+# is is not available.
+# Returns $local_url by side-effect.
+#
+local_but_missing() {
+   read_gitconfig remote.$1.url local_url
+   case "$local_url" in ../*|/*)
+      # url is a local to this host
+      [ -e "$local_url/.git" ] || return 0
+   esac
+   return 1
+}
+
+# String scanner. Return true if a in b.
+#parms: a b [b....]
+scan() {
+ local a=$1
+ shift
+ while [ "$1" ] ; do
+   [ "$a" = "$1" ] && return 0
+   shift
+ done
+ return 1
+}
+usage() {
+   echo "git-sync [-v|-d|-q]"
+   echo "	-v == verbose output"
+   echo "	-d == debug output"
+   echo "	-q == quiet, minimal output"
+   exit 1
+}
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+  -v)	verbose=true ; quiet=false	;;
+  -q)	quiet=true ; verbose=false	;;
+  -d)	debug_flag=true ; verbose=true ; quiet=false ;;
+  -*)	log "unknown option '$1'" ; usage	;;
+  *)	log "usage? '$1'" ; usage
+  esac
+  shift
+done
+
+# Control the amount of git output
+oflag='-q'
+$verbose && oflag='-v'
+
+git_dir=`git rev-parse --git-dir`
+
+exit_unmerged
+
+# The list of remotes to sync can be configured in
+# sync.remotes or, all remotes will be considerred.
+#
+read_gitconfig sync.remotes remotes
+if [ "$remotes" ]; then
+   note "sync.remotes: $remotes"
+else
+   remotes=`git remote`
+fi
+
+mybranch=`git rev-parse --abbrev-ref HEAD`
+
+# Check rebase settings and warn, since git-sync uses
+# merge rather than rebase:
+#
+read_gitconfig branch.$mybranch.rebase rb
+[ "$rb" ] && case "$rb" in no|false) ;;
+*)	note "branch.$mybranch.rebase=$rb but git-sync always uses merge"
+esac
+
+read_gitconfig branch.autoSetupRebase asr
+[ "$asr" ] && case "$asr" in false|no|never) ;;
+*)	note "branch.autoSetupRebase=$asr but git-sync always uses merge"
+esac
+
+# For compatibility with annex, we also do a local sync to
+# branch refs/heads/synced/$mybranch
+git pull $oflag . synced/$mybranch
+exit_unmerged
+git push $oflag . $mybranch:synced/$mybranch
+
+read_gitconfig branch.$mybranch.sync mymerge
+if [ "$mymerge" ]; then
+   note "syncing remote branch: $mymerge"
+else
+   read_gitconfig branch.$mybranch.merge mymerge
+   mymerge=${mymerge#refs/heads/}
+   if [ "$mymerge" ]; then
+      bugme "default merge for '$mybranch' is '$mymerge'"
+   else
+      bugme "no default merge for '$mybranch'"
+   fi
+fi
+
+pushall() {
+  local r s b n le syncto
+  for r in $remotes ; do
+    # Allow config remote.$r.sync to override the merge branch
+    # or disable merge by setting NONE. Also, there is an
+    # override allowed per-branch-per-remote.
+    #
+    read_gitconfig branch.$mybranch.$r-sync s
+    [ "$s" ] || read_gitconfig remote.$r.sync s
+    # Allow sync to be disabled per remote or remote+branch
+    [ "$s" = NONE ] && continue
+
+    if local_but_missing $r ; then
+       note "$r ($local_url) is not available)"
+       continue
+    fi
+
+    # Handle old configuration where I configured:
+    #	remote.{name}.sync synced/master
+    #
+    # I changed that config to mean just a prefix because
+    # it may apply to multiple branches.
+    #
+    if [ "$s" = "synced/master" ]; then
+       echo "Old config warning. Don't config synced/master, just synced"
+       git config -l | fgrep --color synced/master
+       s=synced
+    fi
+    # Allow push to be disabled, per-remote
+    syncto=remote.$r.syncto
+    read_gitconfig $syncto n
+    if [ "$n" = no ]; then
+       note "remote '$r' push excluded (config $syncto)"
+       continue
+    fi
+    if [ "$s" ]; then
+       b=$s/$mybranch
+    else
+       b=$mymerge
+    fi
+    lg=$git_dir/$r.push.log
+    le=$git_dir/$r.push.err
+    if git push --porcelain $r $mybranch:$b > $lg 2> $le ; then
+       $verbose && cat $le >&3
+    else
+       # $verbose && cat $le
+       rc=$?
+       local c dcb=false
+       # c=`wc $le`
+       grep -q "remote rejected.*checked out" $lg && dcb=true
+       if $dcb ; then
+          note
+          log "The remote repo '$r' denied the push to branch $b"
+          note "because there is a working tree active on that branch."
+          case "$b" in synced*) ;;
+          *)
+             note "When pushing to a remote with a working tree, we typically use the"
+             note "the same approach as git-annex and push to synced/{current-branch}"
+             note "To configure this for all remotes:"
+             note "	git config branch.$mybranch.sync synced/$mybranch"
+             note "or,"
+             note "To configure this for only remote '$r':"
+             note "	git config remote.$r.sync synced"
+             note "or,"
+             note "To configure only for this branch ($mybranch) on remote '$r':"
+             note "	git config branch.$mybranch.$r-sync synced"
+             note "or, to disable sync for remote '$r':"
+             note "	git config remote.$r.sync NONE"
+          esac
+          note
+       else
+          log "failed(rc=$rc): push $r $mybranch:$b"
+          note "To disable git-sync pushing to remote '$r', do:"
+          note "	git config $syncto no"
+          cat $lg $le >&3
+       fi
+    fi
+  done
+}
+
+pullall() {
+  local r s m syncfrom sync
+  # fetch remotes
+  # git remote update
+
+  for r in $remotes ;  do
+    exit_unmerged
+
+    # Allow remote branch override based on remote
+    # or remote+branch
+    #
+    sync=branch.$mybranch.$r-sync
+    read_gitconfig $sync s
+    if [ -z "$s" ]; then
+       sync=remote.$r.sync
+       read_gitconfig $sync s
+    fi
+
+    # Handle old config that indicates synced/{branch} rather than
+    # just synced
+    #
+    if [ "$s" = "synced/master" ]; then
+       #echo "Old config warning. Don't config synced/master, just synced"
+       #git config -l | fgrep --color synced/master
+       s=synced
+    fi
+
+    # Allow sync to be disabled for a remote.
+    if [ "$s" = NONE ]; then
+       note "remote '$r' excluded (config $sync)"
+       continue
+    else
+       # Allow pull to be disabled for a remote.
+       syncfrom=remote.$r.syncfrom
+       read_gitconfig $syncfrom n
+       if [ "$n" = no ]; then
+          note "remote $r pull excluded (config $syncfrom)"
+          continue
+       fi
+    fi
+    local_but_missing $r && continue
+    if git fetch $oflag $r ; then
+       :
+    else
+       note "fetch from remote '$r' failed."
+       note "To stop git-sync fetching and merging from remote '$r', do:"
+       note "	git config $syncfrom no"
+    fi
+    if [ "$s" ]; then
+       m=$s/$mybranch
+    else
+       m=$mymerge
+    fi
+    debug "s='$s' m='$m' r='$r' mybranch='$mybranch' mymerge='$mymerge'"
+    git merge $oflag $r/$m || log "failed (rc=$?): merge $r/$m"
+  done
+}
+
+#echo "git_dir=$git_dir"
+#echo "mybranch=$mybranch"
+#echo "remotes='$remotes'"
+#echo "mymerge=$mymerge"
+
+pullall
+exit_unmerged
+pushall
