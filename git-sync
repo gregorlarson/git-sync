@@ -163,7 +163,12 @@ else
    if [ "$mymerge" ]; then
       bugme "default merge for '$mybranch' is '$mymerge'"
    else
-      bugme "no default merge for '$mybranch'"
+      read_gitconfig push.default pushdefault
+      case "$pushdefault" in current)
+         mymerge="$mybranch" ;;
+      *)
+         note "No default merge for '$mybranch' push.default='$pushdefault'"
+      esac
    fi
 fi
 
@@ -206,6 +211,10 @@ pushall() {
        b=$s/$mybranch
     else
        b=$mymerge
+       if [ -z "$b" ]; then
+          note "Can't push '$mybranch' to '$r'. No upstream branch configured."
+          continue
+       fi
     fi
     lg=$git_dir/$r.push.log
     le=$git_dir/$r.push.err
@@ -299,6 +308,10 @@ pullall() {
        m=$s/$mybranch
     else
        m=$mymerge
+       if [ -z "$m" ]; then
+          note "Can't merge from '$r' to '$mybranch'. No upstream branch configured."
+          continue
+       fi
     fi
     debug "s='$s' m='$m' r='$r' mybranch='$mybranch' mymerge='$mymerge'"
     git merge $oflag $r/$m || log "failed (rc=$?): merge $r/$m"
