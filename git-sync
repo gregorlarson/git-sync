@@ -28,9 +28,9 @@ note() {
 }
 git() {
    local rc
-   bugme "git $*"
+   debug "git $*"
    command git "$@" ; rc=$?
-   [ $rc -eq 0 ] || bugme "		git rc=$rc"
+   [ $rc -eq 0 ] || debug "		git rc=$rc"
    return $rc
 }
 
@@ -40,7 +40,7 @@ read_gitconfig() {
 
   local c
   if c=`command git config --get "$1"` ; then
-     bugme "read $1 = $c"
+     debug "read $1 = $c"
      eval "$2='$c'"
   else
      debug "read $1 (unset)"
@@ -70,9 +70,11 @@ local_but_missing() {
    read_gitconfig remote.$1.url local_url
    case "$local_url" in ../*|/*)
       # url is a local to this host
-      [ -e "$local_url/.git" ] || return 0
+      [ -e "$local_url/.git" ] && return 1	# not missing
+      [ -d "$local_url/refs" ] && return 1	# not missing
+      return 0	# local, but missing
    esac
-   return 1
+   return 1	# not local
 }
 
 # String scanner. Return true if a in b.
@@ -310,6 +312,10 @@ pullall() {
        m=$mymerge
        if [ -z "$m" ]; then
           note "Can't merge from '$r' to '$mybranch'. No upstream branch configured."
+          note " - you might need: git config branch.$mybranch.merge refs/heads/$mybranch"
+          note "   even if you don't have a real upstream."
+          note " - if this repo uses ONLY git-sync to other non-bare repos, then you"
+          note "   can instead do: git config branch.$mybranch.sync synced/$mybranch"
           continue
        fi
     fi
