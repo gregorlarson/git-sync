@@ -299,13 +299,7 @@ pullall() {
        fi
     fi
     local_but_missing $r && continue
-    if git fetch $oflag $r ; then
-       :
-    else
-       note "fetch from remote '$r' failed."
-       note "To stop git-sync fetching and merging from remote '$r', do:"
-       note "	git config $syncfrom no"
-    fi
+
     if [ "$s" ]; then
        m=$s/$mybranch
     else
@@ -318,6 +312,20 @@ pullall() {
           note "   can instead do: git config branch.$mybranch.sync synced/$mybranch"
           continue
        fi
+    fi
+
+    # In the case of a remote with many branches, we really don't
+    # need to fetch *all* the branches here. We fetch only the
+    # branch we want to merge ($m). If necessary, I could create
+    # a configuration flag remote.{name}.sync-fetch-all
+    # or sync.fetch-all in order to fetch all branches.
+    #
+    if git fetch $oflag $r $m ; then
+       :
+    else
+       note "fetch from remote '$r' failed."
+       note "To stop git-sync fetching and merging from remote '$r', do:"
+       note "	git config $syncfrom no"
     fi
     debug "s='$s' m='$m' r='$r' mybranch='$mybranch' mymerge='$mymerge'"
     git merge $oflag $r/$m || log "failed (rc=$?): merge $r/$m"
