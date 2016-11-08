@@ -252,6 +252,7 @@ pushall() {
           log "failed(rc=$rc): push $r $mybranch:$b"
           note "To disable git-sync pushing to remote '$r', do:"
           note "	git config $syncto no"
+          note "or:	git config remote.$r.sync NONE"
           cat $lg $le >&3
        fi
     fi
@@ -325,7 +326,8 @@ pullall() {
     else
        note "fetch from remote '$r' failed."
        note "To stop git-sync fetching and merging from remote '$r', do:"
-       note "	git config $syncfrom no"
+       note "		git config $syncfrom no"
+       note "or:	git config remote.$r.sync NONE"
     fi
     debug "s='$s' m='$m' r='$r' mybranch='$mybranch' mymerge='$mymerge'"
     git merge $oflag $r/$m || log "failed (rc=$?): merge $r/$m"
