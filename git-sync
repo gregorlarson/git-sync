@@ -302,6 +302,13 @@ pullall() {
     local_but_missing $r && continue
 
     if [ "$s" ]; then
+       # By pulling only synced/{branch} we are assuming that the remote
+       # must also run git-sync in order to publish branches after commit.
+       # - we could have a hook reminding user to sync.
+       # Another option is to fetch/merge both synced/{branch} and {branch}
+       # - this might solve the problem where the user commits, but
+       #   forgets to push or sync, but, it could cause unfinished
+       #   work to be included.
        m=$s/$mybranch
     else
        m=$mymerge
