@@ -34,14 +34,17 @@ git() {
    return $rc
 }
 
-#parms: config var
+#parms: config var [default]
 read_gitconfig() {
-  [ $# -eq 2 ] || die "read_gitconfig internal error $*"
+  [ $# -eq 2 -o $# -eq 3 ] || die "read_gitconfig internal error $*"
 
   local c
   if c=`command git config --get "$1"` ; then
      debug "read $1 = $c"
      eval "$2='$c'"
+  elif [ "$3" ]; then
+     debug "read $1 (unset) default '$3'"
+     eval "$2='$3'"
   else
      debug "read $1 (unset)"
      eval "$2="
@@ -96,16 +99,31 @@ usage() {
    exit 1
 }
 
+#
+# It is also possible to have a repo that pulls but does not push
+# for some time. That is, it pulls, but does not push by default
+# To configure this, do: git config sync.push false
+# Then, when you are ready to push, you would do: git sync -p
+#
+read_gitconfig sync.push allow_push true
+
 while [ $# -gt 0 ]; do
   case "$1" in
   -v)	verbose=true ; quiet=false	;;
   -q)	quiet=true ; verbose=false	;;
   -d)	debug_flag=true ; verbose=true ; quiet=false ;;
+  -p)	allow_push=true
+	note "Override to push"	;;
   -*)	log "unknown option '$1'" ; usage	;;
   *)	log "usage? '$1'" ; usage
   esac
   shift
 done
+
+case "$allow_push" in true) ;;
+false)	note "Push suppressed by sync.push false. Use -p to force push" ;;
+*)	die "Invalid value for configuration sync.push '$allow_push'"
+esac
 
 # Control the amount of git output
 oflag='-q'
@@ -154,7 +172,9 @@ esac
 # branch refs/heads/synced/$mybranch
 git pull $oflag . synced/$mybranch
 exit_unmerged
-git push $oflag . $mybranch:synced/$mybranch
+if $allow_push; then
+   git push $oflag . $mybranch:synced/$mybranch
+fi
 
 read_gitconfig branch.$mybranch.sync mymerge
 if [ "$mymerge" ]; then
@@ -190,6 +210,7 @@ pushall() {
        note "$r ($local_url) is not available)"
        continue
     fi
+    $allow_push || continue
 
     # Handle old configuration where I configured:
     #	remote.{name}.sync synced/master
@@ -309,6 +330,8 @@ pullall() {
        # - this might solve the problem where the user commits, but
        #   forgets to push or sync, but, it could cause unfinished
        #   work to be included.
+       #   - specifically, often I amend my last commit before I do git sync
+       #   - I might want to rebase or squash on synced/{branch}
        m=$s/$mybranch
     else
        m=$mymerge
@@ -331,7 +354,8 @@ pullall() {
     if git fetch $oflag $r $m ; then
        :
     else
-       note "fetch from remote '$r' failed."
+       note "fetch '$m' from remote '$r' failed."
+       note "	This is not an error if git-sync has not been used on that remote before."
        note "To stop git-sync fetching and merging from remote '$r', do:"
        note "		git config $syncfrom no"
        note "or:	git config remote.$r.sync NONE"
