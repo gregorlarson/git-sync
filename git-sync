@@ -107,6 +107,7 @@ usage() {
 #
 read_gitconfig sync.push allow_push true
 
+remotes=
 while [ $# -gt 0 ]; do
   case "$1" in
   -v)	verbose=true ; quiet=false	;;
@@ -115,10 +116,12 @@ while [ $# -gt 0 ]; do
   -p)	allow_push=true
 	note "Override to push"	;;
   -*)	log "unknown option '$1'" ; usage	;;
-  *)	log "usage? '$1'" ; usage
+  *)	break
   esac
   shift
 done
+
+remotes="$*"
 
 case "$allow_push" in true) ;;
 false)	note "Push suppressed by sync.push false. Use -p to force push" ;;
@@ -146,11 +149,15 @@ exit_unmerged
 # The list of remotes to sync can be configured in
 # sync.remotes or, all remotes will be considerred.
 #
-read_gitconfig sync.remotes remotes
 if [ "$remotes" ]; then
-   note "sync.remotes: $remotes"
+   note "syncing remote: $remotes"
 else
-   remotes=`git remote`
+   read_gitconfig sync.remotes remotes
+   if [ "$remotes" ]; then
+	note "sync.remotes: $remotes"
+   else
+	remotes=`git remote`
+   fi
 fi
 
 mybranch=`git rev-parse --abbrev-ref HEAD`
