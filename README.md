@@ -17,6 +17,12 @@ git config remote.{remotename}.syncto no
 ```
 - this will stop git-sync pushing to that remote (substitute {remotename} with the actual remote).
 
+- also, you can hold back on pushing to external repos by using:
+```
+git config sync.push false
+```
+- this will stop git-sync pushing to remotes unless the `-p` option is used.
+
 # Configuration Settings
 Notation note: {some-field} implies that you need to fill in the actual value `without the {}`.
 
