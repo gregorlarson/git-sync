@@ -92,11 +92,12 @@ scan() {
  return 1
 }
 usage() {
-   echo "git-sync [-v|-d|-q|-p]"
+   echo "git-sync [-v|-d|-q|-p|-s] [remote]"
    echo "	-v == verbose output"
    echo "	-d == debug output"
    echo "	-q == quiet, minimal output"
    echo "	-p == push (even when automatic push disabled)"
+   echo "	-s == override NONE to sync for single remote"
    exit 1
 }
 
@@ -113,6 +114,7 @@ usage() {
 read_gitconfig sync.push allow_push true
 
 remotes=
+NONEsync=
 while [ $# -gt 0 ]; do
   case "$1" in
   -v)	verbose=true ; quiet=false	;;
@@ -120,6 +122,7 @@ while [ $# -gt 0 ]; do
   -d)	debug_flag=true ; verbose=true ; quiet=false ;;
   -p)	allow_push=true
 	note "Override to push"	;;
+  -s)	NONEsync=sync ;;
   -*)	log "unknown option '$1'" ; usage	;;
   *)	break
   esac
@@ -156,7 +159,9 @@ exit_unmerged
 #
 if [ "$remotes" ]; then
    note "syncing remote: $remotes"
+   sync_all=true
 else
+   sync_all=false
    read_gitconfig sync.remotes remotes
    if [ "$remotes" ]; then
 	note "sync.remotes: $remotes"
@@ -191,6 +196,12 @@ exit_unmerged
 # push is allowed to *external* repo. Even if $allow_push
 # is false, we will do a push to synced/{branch}, in order
 # that pulls from remote repos will work.
+
+# Perhaps we need a no_synced flag to indicate that synced is not needed, or,
+# check if synced/$mybranch exists and only push to it if it exists already.
+# Really, this should have been done at the end, not here.
+# - perhaps we want to do it here in case we are interrupted, but then,
+#   we should repeat this at the end.....
 git push $oflag . $mybranch:synced/$mybranch
 
 read_gitconfig branch.$mybranch.sync mymerge
@@ -221,7 +232,10 @@ pushall() {
     read_gitconfig branch.$mybranch.$r-sync s
     [ "$s" ] || read_gitconfig remote.$r.sync s
     # Allow sync to be disabled per remote or remote+branch
-    [ "$s" = NONE ] && continue
+    if [ "$s" = NONE ]; then
+       $sync_all || continue
+       s=$NONEsync
+    fi
 
     if local_but_missing $r ; then
        note "$r ($local_url) is not available)"
@@ -272,6 +286,9 @@ pushall() {
           note "because there is a working tree active on that branch."
           case "$b" in synced*) ;;
           *)
+	if $sync_all ; then
+             note "You may need to add -s when syncing to '$r' explicitly"
+	else
              note "When pushing to a remote with a working tree, we typically use the"
              note "the same approach as git-annex and push to synced/{current-branch}"
              note "To configure this for all remotes:"
@@ -284,6 +301,7 @@ pushall() {
              note "	git config branch.$mybranch.$r-sync synced"
              note "or, to disable sync for remote '$r':"
              note "	git config remote.$r.sync NONE"
+	fi
           esac
           note
        else
@@ -326,8 +344,13 @@ pullall() {
 
     # Allow sync to be disabled for a remote.
     if [ "$s" = NONE ]; then
-       note "remote '$r' excluded (config $sync)"
-       continue
+       if $sync_all ; then
+          note "Override to sync on $r ($mybranch)"
+          s=$NONEsync
+       else
+          note "remote '$r' excluded (config $sync)"
+          continue
+       fi
     else
        # Allow pull to be disabled for a remote.
        syncfrom=remote.$r.syncfrom
@@ -390,3 +413,6 @@ pullall() {
 pullall
 exit_unmerged
 pushall
+
+# finally, updated synced branch once more....
+git push $oflag . $mybranch:synced/$mybranch
