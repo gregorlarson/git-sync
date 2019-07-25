@@ -42,13 +42,17 @@ read_gitconfig() {
   if c=`command git config --get "$1"` ; then
      debug "read $1 = $c"
      eval "$2='$c'"
-  elif [ "$3" ]; then
+     return 0 #true, note that empty-string is allowed.
+  fi
+
+  if [ "$3" ]; then
      debug "read $1 (unset) default '$3'"
      eval "$2='$3'"
   else
      debug "read $1 (unset)"
      eval "$2="
   fi
+  return 1 #false
 }
 
 mergehead="$git_dir/MERGE_HEAD"
@@ -97,9 +101,22 @@ usage() {
    echo "	-d == debug output"
    echo "	-q == quiet, minimal output"
    echo "	-p == push (even when automatic push disabled)"
-   echo "	-s == override NONE to sync for single remote"
+   echo "	-s == override remote.X.sync from NONE to synced"
    exit 1
 }
+
+#
+# In some cases, a repo might be syncd for backup and use with git diff,
+# but we never want to merge. For example etckeeper.
+#
+# To disable merging, set:
+#	git config sync.merge false
+#
+read_gitconfig sync.merge allow_merge true
+case "$allow_merge" in true) ;;
+false)	note "Merge suppressed by sync.merge false." ;;
+*)	die "Invalid value for configuration sync.merge '$allow_merge'"
+esac
 
 #
 # It is also possible to have a repo that pulls but does not push
@@ -122,7 +139,7 @@ while [ $# -gt 0 ]; do
   -d)	debug_flag=true ; verbose=true ; quiet=false ;;
   -p)	allow_push=true
 	note "Override to push"	;;
-  -s)	NONEsync=sync ;;
+  -s)	NONEsync=synced ;;
   -*)	log "unknown option '$1'" ; usage	;;
   *)	break
   esac
@@ -162,8 +179,9 @@ if [ "$remotes" ]; then
    sync_all=true
 else
    sync_all=false
-   read_gitconfig sync.remotes remotes
-   if [ "$remotes" ]; then
+   # An empty config sync.remotes ''
+   # will suppress non-specified sync
+   if read_gitconfig sync.remotes remotes ; then
 	note "sync.remotes: $remotes"
    else
 	remotes=`git remote`
@@ -175,21 +193,25 @@ mybranch=`git rev-parse --abbrev-ref HEAD`
 # Check rebase settings and warn, since git-sync uses
 # merge rather than rebase:
 #
-read_gitconfig branch.$mybranch.rebase rb
-[ "$rb" ] && case "$rb" in no|false) ;;
-*)	note "branch.$mybranch.rebase=$rb but git-sync always uses merge"
-esac
+if read_gitconfig branch.$mybranch.rebase rb ; then
+   case "_$rb" in _no|_false) ;;
+   *)	note "branch.$mybranch.rebase=$rb but git-sync always uses merge"
+   esac
+fi
 
-read_gitconfig branch.autoSetupRebase asr
-[ "$asr" ] && case "$asr" in false|no|never) ;;
-*)	note "branch.autoSetupRebase=$asr but git-sync always uses merge"
-esac
+if read_gitconfig branch.autoSetupRebase asr ; then
+   case "_$asr" in _false|_no|_never) ;;
+   *)	note "branch.autoSetupRebase=$asr but git-sync always uses merge"
+   esac
+fi
 
 # For compatibility with annex, we also do a local sync to
 # branch refs/heads/synced/$mybranch
 # TODO: Figure out if we should skip local synced/ if we are in a bare repo,
 #	or, in a bare repo, and, the synced/$mybranch does not already exist.
-git pull $oflag . synced/$mybranch
+if $allow_merge ; then
+	git pull $oflag . synced/$mybranch
+fi
 exit_unmerged
 
 # The meaning of allow_push is now adjusted to indicate
@@ -199,9 +221,8 @@ exit_unmerged
 
 # Perhaps we need a no_synced flag to indicate that synced is not needed, or,
 # check if synced/$mybranch exists and only push to it if it exists already.
-# Really, this should have been done at the end, not here.
-# - perhaps we want to do it here in case we are interrupted, but then,
-#   we should repeat this at the end.....
+# - currently, we repeat this push at the end.
+# - this push might help if we are interrupted?
 git push $oflag . $mybranch:synced/$mybranch
 
 read_gitconfig branch.$mybranch.sync mymerge
@@ -401,7 +422,9 @@ pullall() {
        note "or:	git config remote.$r.sync NONE"
     fi
     debug "s='$s' m='$m' r='$r' mybranch='$mybranch' mymerge='$mymerge'"
-    git merge $oflag $r/$m || log "failed (rc=$?): merge $r/$m"
+    if $allow_merge ; then
+        git merge $oflag $r/$m || log "failed (rc=$?): merge $r/$m"
+    fi
   done
 }
 
