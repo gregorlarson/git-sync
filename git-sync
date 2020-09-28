@@ -1,5 +1,26 @@
 #!/bin/sh
 
+# TODO:
+#  - clean up confusion around -s and NONEsync remote.{r}.sync
+#     - make sync-mode orthogonal to sync on/off
+#     - make remote.{r}.syncmode the mode
+#     - make remote.{r}.sync=no the disable
+#        - transition with a warning, example commands
+#
+#  - allow rebasing local changes rather than merging
+#
+#  - allow force {mybranch} -> synced/{mybranch}
+#     - if rebase or amend was done that invalidates synced/{mybranch}
+#       could I detect and force overwrite synced/{mybranch}
+#
+#  - fetch {remote}/{mybranch} and {remote}/synced/{mybranch}
+#     - detect if remote branch was rebased or amended.
+#     - provide better output/hints to operator
+#     - auto purge synced/{branch} if {branch} is gone
+#     - auto purge refs/remotes/{remote}/synced/{branch} if
+#        refs/remotes/{remote}/{branch} is gone
+#     - automatically push to {remote}/synced/{mybranch} if it exists.
+#
 # Utility functions:
 
 # Use fd 3 for logging, default stderr.
@@ -253,9 +274,12 @@ pushall() {
     read_gitconfig branch.$mybranch.$r-sync s
     [ "$s" ] || read_gitconfig remote.$r.sync s
     # Allow sync to be disabled per remote or remote+branch
-    if [ "$s" = NONE ]; then
-       $sync_all || continue
-       s=$NONEsync
+    if $sync_all; then
+       # Sync a list of remotes (usually 1)
+       s=$NONEsync	# allow -s override
+    else
+       # exclude some remotes
+       [ "$s" = NONE ] && continue
     fi
 
     if local_but_missing $r ; then
@@ -363,23 +387,25 @@ pullall() {
        s=synced
     fi
 
-    # Allow sync to be disabled for a remote.
-    if [ "$s" = NONE ]; then
-       if $sync_all ; then
-          note "Override to sync on $r ($mybranch)"
-          s=$NONEsync
-       else
+    # Allow sync to be disabled per remote or remote+branch
+    if $sync_all; then
+       # Sync a list of remotes (usually 1)
+       [ "$s" = NONE ] && note "Override to sync on $r ($mybranch)"
+       s=$NONEsync	# allow -s override
+    else
+       # exclude some remotes
+       if [ "$s" = NONE ]; then
           note "remote '$r' excluded (config $sync)"
           continue
        fi
-    else
-       # Allow pull to be disabled for a remote.
-       syncfrom=remote.$r.syncfrom
-       read_gitconfig $syncfrom n
-       if [ "$n" = no ]; then
-          note "remote $r pull excluded (config $syncfrom)"
-          continue
-       fi
+    fi
+
+    # Allow pull to be disabled for a remote.
+    syncfrom=remote.$r.syncfrom
+    read_gitconfig $syncfrom n
+    if [ "$n" = no ]; then
+       note "remote $r pull excluded (config $syncfrom)"
+       continue
     fi
     local_but_missing $r && continue
 
@@ -439,3 +465,5 @@ pushall
 
 # finally, updated synced branch once more....
 git push $oflag . $mybranch:synced/$mybranch
+
+# vim: et sts=3
